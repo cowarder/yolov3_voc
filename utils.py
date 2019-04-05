@@ -1,4 +1,9 @@
+#!/usr/bin/python
+# encoding: utf-8
+
 import torch
+import os
+import numpy as np
 
 
 def parse_cfg(cfgfile):
@@ -29,10 +34,28 @@ def parse_cfg(cfgfile):
     return blocks
 
 
+def read_data_file(datafile):
+    options = dict()
+
+    with open(datafile, 'r') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        line = line.strip()
+        if line == '':
+            continue
+        key, value = line.split('=')
+        key = key.strip()
+        value = value.strip()
+        options[key] = value
+    return options
+
+
 def convert2cpu(gpu_matrix):
     return torch.FloatTensor(gpu_matrix.size()).copy_(gpu_matrix)
 
-def iou(box1, box2):
+
+def cal_iou(box1, box2):
     """
     Calculate iou between two boxes.
     :param box1: anchorbox (x,y,w,h).t()
@@ -59,7 +82,8 @@ def iou(box1, box2):
     iou = float(intersec / union)
     return iou
 
-def multi_ious(boxes1, boxes2):
+
+def cal_ious(boxes1, boxes2):
     """
     Calculate ious between two box sets.
     :param boxes1: attributes of boxes, (4, nA*nW*nH), (x, y, w,h)
@@ -85,3 +109,23 @@ def multi_ious(boxes1, boxes2):
     union = w1 * h1 + w2 * h2 - intersec
     ious = intersec / union
     return ious
+
+
+def read_truths(lab_path):
+    if not os.path.exists(lab_path):
+        return np.array([])
+    if os.path.getsize(lab_path):
+        truths = np.loadtxt(lab_path)
+        truths = truths.reshape(truths.size/5, 5)   # to avoid single truth problem
+        return truths
+    else:
+        return np.array([])
+
+
+def read_truths_args(lab_path, min_box_scale):
+    truths = read_truths(lab_path)
+    new_truths = []
+    for i in range(truths.shape[0]):
+        if truths[i][3] < min_box_scale:
+            continue
+        new_truths.append([truths[i][0], truths[i][1], truths[i][2], truths[i][3], truths[i][4]])

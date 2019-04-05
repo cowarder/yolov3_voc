@@ -1,10 +1,14 @@
+#!/usr/bin/python
+# encoding: utf-8
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .utils import *
 import math
 import sys
-from torchsummary import summary
+# from torchsummary import summary
+
 
 class EmptyLayer(nn.Module):
 
@@ -43,8 +47,9 @@ class YoloLayer(nn.Module):
         self.net_width = 416
         self.use_cuda = use_cuda
         self.device = 'cuda' if use_cuda else 'cpu'
+        self.nth_layer = 0
 
-    def build_target(self, pred_boxes, target, anchors, nA, nH, nW):
+    def build_targets(self, pred_boxes, target, anchors, nA, nH, nW):
         """
 
         :param pred_boxes: (nB*nA*nH*nW, 4)
@@ -85,7 +90,7 @@ class YoloLayer(nn.Module):
                 cur_gt_boxes = torch.FloatTensor([gx, gy, gw, gh]).repeat(nAnchors, 1).t()
                 #   cur_pred_boxes(4, nA*nH*nW)          cur_gt_boxes(4, nA*nH*nW)
                 # 所有的额prediction与所有ground truth计算iou值，保留每个prediction最大的iou值
-                cur_ious = torch.max(cur_ious, multi_ious(cur_pred_boxes, cur_gt_boxes))
+                cur_ious = torch.max(cur_ious, cal_ious(cur_pred_boxes, cur_gt_boxes))
             # 过滤掉cur_pre_boxes中与所有ground truth的iou值均低于threshold的预测box(noobj_mask = 0)
             ignore_ix = (cur_ious > self.ignore_thresh).view(nA, nH, nW)
             noobj_mask[b][ignore_ix] = 0
@@ -103,12 +108,12 @@ class YoloLayer(nn.Module):
                 tmp_gt_boxes = torch.FloatTensor([0, 0, gw, gh]).repeat(nA, 1).t()           # 4*3
                 anchor_boxes = torch.cat((torch.zeros(nA, len(anchors)), anchors), 1).t()    # 4*3
                 # best_n表示3个anchor中第几个anchor最优
-                _, best_n = torch.max(multi_ious(anchor_boxes, tmp_gt_boxes), 0)
+                _, best_n = torch.max(cal_ious(anchor_boxes, tmp_gt_boxes), 0)
 
                 gt_box = torch.FloatTensor([gx, gy, gw, gh])
                 # 一个cell只有一个box负责预测
                 pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
-                iou = iou(gt_box, pred_box)
+                iou = cal_iou(gt_box, pred_box)
 
                 obj_mask[b][best_n][gj][gi] = 1
                 noobj_mask[b][best_n][gj][gi] = 0
@@ -151,7 +156,7 @@ class YoloLayer(nn.Module):
 
         # 获取每个anchor的class
         cls = output.index_select(2, cls_grid)
-        cls = cls.view(nB*nA, nC, nH*nW).transporse(1, 2).contiguous().view(cls_anchor_dim, nC).to(self.device)
+        cls = cls.view(nB*nA, nC, nH*nW).transpose(1, 2).contiguous().view(cls_anchor_dim, nC).to(self.device)
 
         # 获取网格的(x, y),0~nW-1,0~nH-1
         grid_x = torch.linspace(0, nW - 1, nW).repeat(nB * nA, nH, 1).view(cls_anchor_dim).to(self.device)
@@ -198,7 +203,13 @@ class YoloLayer(nn.Module):
               ' conf %6.3f, class %6.3f, total %7.3f'
               % (self.seen, self.nth_layer, nGT, nRecall, nRecall75, nProposals, loss_coord, loss_conf, loss_cls, loss))
         if math.isnan(loss.item()):
-            print(coord, conf, tconf)
+            print(np.any(np.isnan(conf.detach().numpy())))
+            print(np.any(np.isnan(output.detach().numpy())))
+            print(np.any(np.isnan(tconf.detach().numpy())))
+
+            # print(coord, conf, tconf)
+            # print(conf)
+
             sys.exit(0)
         return loss
 
@@ -218,8 +229,8 @@ class Darknet(nn.Module):
     def get_loss_layers(self):
         loss_layers = []
         for module in self.models:
-            if isinstance(module, YoloLayer):
-                loss_layers.append(module)
+            if isinstance(module[0], YoloLayer):
+                loss_layers.append(module[0])
         return loss_layers
 
     def forward(self, x):
@@ -329,6 +340,8 @@ class Darknet(nn.Module):
                 yolo_layer.layer_num = index
                 yolo_layer.net_width = self.width
                 yolo_layer.net_height = self.height
+                yolo_layer.nth_layer = index
+                #module.add_module('yolo_{0}'.format(index), yolo_layer)
                 module.add_module('yolo_{0}'.format(index), yolo_layer)
 
             models.append(module)

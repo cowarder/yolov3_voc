@@ -145,7 +145,7 @@ def load_data_detection(imgpath, shape, jitter, hue, saturation, exposure):
     return img, label
 
 
-def letter_box(img, net_w, net_h):
+def letter_image(img, net_w, net_h):
     """
     resize image, while keeping the aspect ratio consistent.
     :param img: RGN image.
