@@ -355,19 +355,18 @@ class Darknet(nn.Module):
         return models
 
     def load_weights(self, weightfile):
-        fp = open(weightfile, 'rb')
+        with open(weightfile, 'rb') as f:
+            # The first 5 values are header information
+            # 1. Major version number
+            # 2. Minor Version Number
+            # 3. Subversion number
+            # 4,5. Images seen by the network (during training)
 
-        # The first 5 values are header information
-        # 1. Major version number
-        # 2. Minor Version Number
-        # 3. Subversion number
-        # 4,5. Images seen by the network (during training)
+            header = np.fromfile(f, dtype=np.int32, count=5)
+            self.header = torch.from_numpy(header)
+            self.seen = self.header[3]
 
-        header = np.fromfile(fp, dtype=np.int32, count=5)
-        self.header = torch.from_numpy(header)
-        self.seen = self.header[3]
-
-        weights = np.fromfile(fp, dtype=np.float32)
+            weights = np.fromfile(f, dtype=np.float32)
 
         ptr = 0
         for i in range(len(self.models)):
@@ -435,6 +434,56 @@ class Darknet(nn.Module):
 
                 conv_weights = conv_weights.view_as(conv.weight.data)
                 conv.weight.data.copy_(conv_weights)
+        # print(ptr, len(weights))
+
+    def save_weights(self, outfile):
+        with open(outfile, 'wb') as f:
+            self.header[3] = self.seen
+            header = np.array(self.header.numpy(), np.int32)
+            header.tofile(f)
+
+            for i in range(len(self.models)):
+                if self.blocks[i+1]['type'] == 'convolutional':
+                    model = self.models[i]
+                    try:
+                        batch_normalize = int(self.blocks[i + 1]['batch_normalize'])
+                    except Exception:
+                        batch_normalize = 0
+                    if batch_normalize:
+                        conv = model[0]
+                        bn = model[1]
+
+                        if bn.bias.is_cuda:
+                            convert2cpu(bn.bias.data).numpy().tofile(f)
+                            convert2cpu(bn.weight.data).numpy().tofile(f)
+                            convert2cpu(bn.running_mean.data).numpy().tofile(f)
+                            convert2cpu(bn.running_var.data).numpy().tofile(f)
+                            convert2cpu(conv.weight.data).numpy().tofile(f)
+                        else:
+                            bn.bias.data.numpy().tofile(f)
+                            bn.weight.data.numpy().tofile(f)
+                            bn.running_mean.data.numpy().tofile(f)
+                            bn.running_var.data.numpy().tofile(f)
+                            bn.weight.data.numpy().tofile(f)
+                    else:
+                        conv = model[0]
+                        if conv.bias.is_cuda:
+                            convert2cpu(conv.bias.data).numpy().tofile(f)
+                            convert2cpu(conv.weight.data).numpy().tofile(f)
+                        else:
+                            conv.bias.data.numpy().tofile(f)
+                            conv.weight.data.numpy().tofile(f)
+
+                elif self.blocks[i+1]['type'] == 'shortcut':
+                    pass
+                elif self.blocks[i+1]['type'] == 'route':
+                    pass
+                elif self.blocks[i+1]['type'] == 'upsample':
+                    pass
+                elif self.blocks[i+1]['type'] == 'yolo':
+                    pass
+                else:
+                    print("Unknown layer type:{}".format(self.blocks[i+1]['type']))
 
 
 if __name__=="__main__":
