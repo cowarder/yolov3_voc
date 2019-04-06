@@ -1,0 +1,8 @@
+yolov3.weights: 
+	The official weights file is binary file that contains weights stored in a serial fashion.
+	The weights are just stored as floats, with nothing to guide us as to which layer do they belong to. 
+	The weights belong to only two types of layers, either a batch norm layer or a convolutional layer.
+	If a convolutional is followed by a shortcut block, and then the shortcut block by another convolutional block, 
+		You will expect file to contain the weights of the previous convolutional block, followed by those of the latter.
+	When the batch norm layer appears in a convolutional block, there are no biases. 
+		However, when there's no batch norm layer, bias "weights" have to read from the file.

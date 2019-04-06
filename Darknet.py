@@ -3,6 +3,7 @@
 
 import torch
 import torch.nn as nn
+import numpy as np
 import torch.nn.functional as F
 from .utils import *
 import math
@@ -114,6 +115,10 @@ class YoloLayer(nn.Module):
                 # 一个cell只有一个box负责预测
                 pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
                 iou = cal_iou(gt_box, pred_box)
+                # pred_box get inf value, so code crashed
+                #if math.isnan(iou):
+                #    print(gt_box, pred_box)
+                #    print(torch.isnan(pred_boxes.detach()).sum().item())
 
                 obj_mask[b][best_n][gj][gi] = 1
                 noobj_mask[b][best_n][gj][gi] = 0
@@ -173,6 +178,7 @@ class YoloLayer(nn.Module):
         pred_boxes[2] = coord[2].exp() * anchor_w
         pred_boxes[3] = coord[3].exp() * anchor_h
 
+
         pred_boxes = convert2cpu(pred_boxes.transpose(0, 1).contiguous().view(-1, 4)).detach()
 
         # pred_boxes(nB*nA*nH*nW, 4)   target(batchsize, 250)其中250是50*5    anchors(nA, 2)
@@ -197,19 +203,16 @@ class YoloLayer(nn.Module):
         loss_conf = nn.BCELoss(reduction='sum')(conf * conf_mask, tconf * conf_mask) / nB
         loss_cls = nn.BCEWithLogitsLoss(reduction='sum')(cls, tcls) / nB
 
-        loss = loss_coord + loss_conf + loss_cls
+        if math.isnan(loss_conf.item()):
+            loss = loss_coord + loss_cls
+        else:
+            loss = loss_coord + loss_conf + loss_cls
 
         print('%d: Layer(%03d) nGT %3d, nRC %3d, nRC75 %3d, nPP %3d, loss: box %6.3f,'
               ' conf %6.3f, class %6.3f, total %7.3f'
               % (self.seen, self.nth_layer, nGT, nRecall, nRecall75, nProposals, loss_coord, loss_conf, loss_cls, loss))
         if math.isnan(loss.item()):
-            print(np.any(np.isnan(conf.detach().numpy())))
-            print(np.any(np.isnan(output.detach().numpy())))
-            print(np.any(np.isnan(tconf.detach().numpy())))
-
-            # print(coord, conf, tconf)
-            # print(conf)
-
+            print(coord, conf, tconf)
             sys.exit(0)
         return loss
 
@@ -225,6 +228,7 @@ class Darknet(nn.Module):
         self.models = self.create_modules(self.blocks)
         self.loss_layers = self.get_loss_layers()
         self.seen = 0
+        self.header = None
 
     def get_loss_layers(self):
         loss_layers = []
@@ -349,6 +353,88 @@ class Darknet(nn.Module):
             out_filters.append(prev_filters)
 
         return models
+
+    def load_weights(self, weightfile):
+        fp = open(weightfile, 'rb')
+
+        # The first 5 values are header information
+        # 1. Major version number
+        # 2. Minor Version Number
+        # 3. Subversion number
+        # 4,5. Images seen by the network (during training)
+
+        header = np.fromfile(fp, dtype=np.int32, count=5)
+        self.header = torch.from_numpy(header)
+        self.seen = self.header[3]
+
+        weights = np.fromfile(fp, dtype=np.float32)
+
+        ptr = 0
+        for i in range(len(self.models)):
+            module_type = self.blocks[i+1]['type']
+
+            if module_type == 'convolutional':
+                model = self.models[i]
+                try:
+                    batch_normalize = int(self.blocks[i+1]['batch_normalize'])
+                except:
+                    batch_normalize = 0
+
+                conv = model[0]
+
+                if batch_normalize:
+                    bn = model[1]
+
+                    # Get the number of weights of Batch Norm Layer
+                    num_bn_biases = bn.bias.numel()
+
+                    # Load the weights
+                    bn_biases = torch.from_numpy(weights[ptr:ptr + num_bn_biases])
+                    ptr += num_bn_biases
+
+                    bn_weights = torch.from_numpy(weights[ptr: ptr + num_bn_biases])
+                    ptr += num_bn_biases
+
+                    bn_running_mean = torch.from_numpy(weights[ptr: ptr + num_bn_biases])
+                    ptr += num_bn_biases
+
+                    bn_running_var = torch.from_numpy(weights[ptr: ptr + num_bn_biases])
+                    ptr += num_bn_biases
+
+                    # Cast the loaded weights into dims of model weights.
+                    bn_biases = bn_biases.view_as(bn.bias.data)
+                    bn_weights = bn_weights.view_as(bn.weight.data)
+                    bn_running_mean = bn_running_mean.view_as(bn.running_mean)
+                    bn_running_var = bn_running_var.view_as(bn.running_var)
+
+                    # Copy the data to model
+                    bn.bias.data.copy_(bn_biases)
+                    bn.weight.data.copy_(bn_weights)
+                    bn.running_mean.data.copy_(bn_running_mean)
+                    bn.running_var.data.copy_(bn_running_var)
+
+                else:
+                    num_biases = conv.bias.numel()
+
+                    # Load the weights
+                    conv_biases = torch.from_numpy(weights[ptr: ptr + num_biases])
+                    ptr = ptr + num_biases
+
+                    # reshape the loaded weights according to the dims of the model weights
+                    conv_biases = conv_biases.view_as(conv.bias.data)
+
+                    # Finally copy the data
+                    conv.bias.data.copy_(conv_biases)
+
+                # Load the weights for the Convolutional layers
+                num_weights = conv.weight.numel()
+
+                # Do the same as above for weights
+                conv_weights = torch.from_numpy(weights[ptr:ptr + num_weights])
+                ptr = ptr + num_weights
+
+                conv_weights = conv_weights.view_as(conv.weight.data)
+                conv.weight.data.copy_(conv_weights)
 
 
 if __name__=="__main__":
