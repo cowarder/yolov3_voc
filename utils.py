@@ -4,6 +4,7 @@
 import torch
 import os
 import numpy as np
+import time
 
 
 def parse_cfg(cfgfile):
@@ -53,6 +54,9 @@ def read_data_file(datafile):
 
 def convert2cpu(gpu_matrix):
     return torch.FloatTensor(gpu_matrix.size()).copy_(gpu_matrix)
+
+def convert2longcpu(gpu_matrix):
+    return torch.LongTensor(gpu_matrix.size()).copy_(gpu_matrix)
 
 
 def cal_iou(box1, box2):
@@ -129,3 +133,143 @@ def read_truths_args(lab_path, min_box_scale):
         if truths[i][3] < min_box_scale:
             continue
         new_truths.append([truths[i][0], truths[i][1], truths[i][2], truths[i][3], truths[i][4]])
+    return np.array(new_truths)
+
+
+def read_class_names(classfile):
+    with open(classfile, 'r') as f:
+        lines = f.readlines()
+    name_list = []
+    for line in lines:
+        name_list.append(line.strip())
+    return name_list
+
+
+def get_all_boxes(result, net_shape, conf_thresh, device):
+    """
+    combine three scale prediction boxes
+    :param result: three scale prediction of yolo layers
+    :param net_shape: (net.width, net.height)
+    :param conf_thresh: confidence thresh
+    :param device: device
+    :return: predicted boxes of three scales
+    """
+    assert len(result) == 3
+    nB = len(result[0]['output'])
+    all_boxes = [[]for i in range(nB)]
+    for i in range(result):
+        output = result[i]['output'].data
+        anchors = result[i]['anchors']
+        b = get_yolo_boxes(output, net_shape, anchors, conf_thresh, device)
+        for j in b:
+            all_boxes[j] += b[j]
+    return all_boxes
+
+
+def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
+    """
+    one scale prediction boxes
+    :param output: one scale prediction
+    :param net_shape: (net.width, net.height)
+    :param anchors: corresponding different scale anchors
+    :param conf_thresh: confidence thresh
+    :param device: device
+    :return: predicted boxes of one scale
+    """
+    net_w, net_h = net_shape
+    nC = len(anchors)
+    nB = output.shape[0]
+    nA = len(anchors)
+    nH = output.data.size(2)
+    nW = output.data.size(3)
+    anchors = torch.FloatTensor(anchors).view(nA, -1).to(device)
+    cls_anchor_dim = nB * nA * nW * nH
+
+    output = output.view(nB, nA, 5 + nC, nW, nH)
+    cls_grid = torch.LongTensor(range(5, 5 + nC - 1, 1)).to(device)
+    ix = torch.LongTensor(range(5)).to(device)
+    pred_boxes = torch.FloatTensor(4, cls_anchor_dim)
+
+    # coordinate
+    coord = output.index_select(2, ix[0:4]).view(nB * nA, -1, nW * nH).transpose(0, 1) \
+        .contiguous().view(-1, cls_anchor_dim).to(device)
+    coord[0:2] = coord[0:2].sigmoid()
+
+    # confidence
+    confs = output.index_select(2, ix[4]).view(cls_anchor_dim).sigmoid().to(device)
+
+    # class
+    cls = output.index_select(2, cls_grid).view(nB * nA, nC, nW * nH) \
+        .transpose(1, 2).contiguous().view(cls_anchor_dim, nC).to(device)
+    cls_conf = torch.nn.Softmax(dim=1)(cls)
+    cls_max_confs, cls_max_ids = torch.max(cls_conf, 1)
+    cls_max_confs = cls_max_confs.view(-1)
+    cls_max_ids = cls_max_ids.view(-1)
+
+    grid_x = torch.linspace(0, nW - 1, nW).repeat(nB * nA, nH, 1).view(cls_anchor_dim).to(device)
+    grid_y = torch.linspace(0, nH - 1, nH).repeat(nW, 1).t().repeat(nB * nA, 1, 1) \
+        .view(cls_anchor_dim).to(device)
+
+    anchor_w = anchors.index_select(1, 0).repeat(nB, nW * nH).view(cls_anchor_dim)
+    anchor_h = anchors.index_select(1, 1).repeat(nB, nW * nH).view(cls_anchor_dim)
+
+    pred_boxes[0] = coord[0] + grid_x
+    pred_boxes[1] = coord[1] + grid_y
+    pred_boxes[2] = coord[2].exp() * anchor_w
+    pred_boxes[3] = coord[3].exp() * anchor_h
+
+    confs = convert2cpu(confs)
+    cls_max_confs = convert2cpu(cls_max_confs)
+    cls_max_ids = convert2longcpu(cls_max_ids)
+    pred_boxes = convert2cpu(pred_boxes)
+
+    # batch boxes
+    all_boxes = []
+    for b in range(nB):
+        # for every image
+        boxes = []
+        for cy in range(nH):
+            for cx in range(nW):
+                for i in range(nA):
+                    index = b * nA * nW * nH + i * nW * nH + cy * nW + cx
+                    target_conf = confs[index]
+
+                    if target_conf > conf_thresh:
+                        cls_max_id = cls_max_ids[index]
+                        cls_max_conf = cls_max_confs[index]
+                        target_box = pred_boxes[index]
+                        bx = target_box[0]
+                        by = target_box[1]
+                        bw = target_box[2]
+                        bh = target_box[3]
+                        box = [bx / nW, by / nH, bw / net_w, bh / net_h, target_conf, cls_max_conf, cls_max_id]
+                        boxes.append(box)
+        all_boxes.append(boxes)
+    return all_boxes
+
+
+def nms(boxes, nms_thresh):
+    boxes = [box for box in boxes if len(box)>0]
+    res = []
+
+    # transfer tensor to numpy matrix
+    for box in boxes:
+        temp = []
+        for item in box:
+            if torch.is_tensor(item):
+                item = float(item.numpy())
+            temp.append(item)
+        res.append(temp)
+    boxes = res
+    conf = np.array(boxes)[:, 4]
+    sortIndex = list(reversed(np.argsort(conf)))
+    out_boxes = []
+    for i in range(len(sortIndex)):
+        box_i = boxes[sortIndex[i]]
+        if box_i[4] > 0:
+            out_boxes.append(box_i)
+            for j in range(i+1, len(sortIndex)):
+                box_j = boxes[sortIndex[j]]
+                if cal_iou(box_i, box_j) > nms_thresh:
+                    box_j[4] = 0
+    return np.array(out_boxes)
