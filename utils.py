@@ -4,7 +4,10 @@
 import torch
 import os
 import numpy as np
+import math
 import time
+from PIL import Image, ImageDraw, ImageFont
+from torchvision import transforms
 
 
 def parse_cfg(cfgfile):
@@ -54,6 +57,7 @@ def read_data_file(datafile):
 
 def convert2cpu(gpu_matrix):
     return torch.FloatTensor(gpu_matrix.size()).copy_(gpu_matrix)
+
 
 def convert2longcpu(gpu_matrix):
     return torch.LongTensor(gpu_matrix.size()).copy_(gpu_matrix)
@@ -145,7 +149,7 @@ def read_class_names(classfile):
     return name_list
 
 
-def get_all_boxes(result, net_shape, conf_thresh, device):
+def get_all_boxes(result, net_shape, conf_thresh, num_classes, device='cpu'):
     """
     combine three scale prediction boxes
     :param result: three scale prediction of yolo layers
@@ -156,17 +160,17 @@ def get_all_boxes(result, net_shape, conf_thresh, device):
     """
     assert len(result) == 3
     nB = len(result[0]['output'])
-    all_boxes = [[]for i in range(nB)]
-    for i in range(result):
+    all_boxes = [[] for i in range(nB)]
+    for i in range(len(result)):
         output = result[i]['output'].data
         anchors = result[i]['anchors']
-        b = get_yolo_boxes(output, net_shape, anchors, conf_thresh, device)
-        for j in b:
+        b = get_yolo_boxes(output, net_shape, anchors, conf_thresh, num_classes, device)
+        for j in range(nB):
             all_boxes[j] += b[j]
     return all_boxes
 
 
-def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
+def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20, device='cpu'):
     """
     one scale prediction boxes
     :param output: one scale prediction
@@ -177,7 +181,7 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
     :return: predicted boxes of one scale
     """
     net_w, net_h = net_shape
-    nC = len(anchors)
+    nC = int(num_classes)
     nB = output.shape[0]
     nA = len(anchors)
     nH = output.data.size(2)
@@ -185,8 +189,8 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
     anchors = torch.FloatTensor(anchors).view(nA, -1).to(device)
     cls_anchor_dim = nB * nA * nW * nH
 
-    output = output.view(nB, nA, 5 + nC, nW, nH)
-    cls_grid = torch.LongTensor(range(5, 5 + nC - 1, 1)).to(device)
+    output = output.view(nB, nA, (5 + nC), nW, nH)
+    cls_grid = torch.LongTensor(range(5, 5 + nC, 1)).to(device)
     ix = torch.LongTensor(range(5)).to(device)
     pred_boxes = torch.FloatTensor(4, cls_anchor_dim)
 
@@ -197,6 +201,7 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
 
     # confidence
     confs = output.index_select(2, ix[4]).view(cls_anchor_dim).sigmoid().to(device)
+
 
     # class
     cls = output.index_select(2, cls_grid).view(nB * nA, nC, nW * nH) \
@@ -210,8 +215,8 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
     grid_y = torch.linspace(0, nH - 1, nH).repeat(nW, 1).t().repeat(nB * nA, 1, 1) \
         .view(cls_anchor_dim).to(device)
 
-    anchor_w = anchors.index_select(1, 0).repeat(nB, nW * nH).view(cls_anchor_dim)
-    anchor_h = anchors.index_select(1, 1).repeat(nB, nW * nH).view(cls_anchor_dim)
+    anchor_w = anchors.index_select(1, ix[0]).repeat(nB, nW * nH).view(cls_anchor_dim)
+    anchor_h = anchors.index_select(1, ix[1]).repeat(nB, nW * nH).view(cls_anchor_dim)
 
     pred_boxes[0] = coord[0] + grid_x
     pred_boxes[1] = coord[1] + grid_y
@@ -222,7 +227,7 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
     cls_max_confs = convert2cpu(cls_max_confs)
     cls_max_ids = convert2longcpu(cls_max_ids)
     pred_boxes = convert2cpu(pred_boxes)
-
+    pred_boxes = pred_boxes.transpose(0, 1).contiguous()
     # batch boxes
     all_boxes = []
     for b in range(nB):
@@ -251,7 +256,6 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, device='cpu'):
 def nms(boxes, nms_thresh):
     boxes = [box for box in boxes if len(box)>0]
     res = []
-
     # transfer tensor to numpy matrix
     for box in boxes:
         temp = []
@@ -261,7 +265,9 @@ def nms(boxes, nms_thresh):
             temp.append(item)
         res.append(temp)
     boxes = res
-    conf = np.array(boxes)[:, 4]
+    conf = np.zeros(len(boxes))
+    for i in range(len(boxes)):
+        conf[i] = boxes[i][4]
     sortIndex = list(reversed(np.argsort(conf)))
     out_boxes = []
     for i in range(len(sortIndex)):
@@ -273,3 +279,107 @@ def nms(boxes, nms_thresh):
                 if cal_iou(box_i, box_j) > nms_thresh:
                     box_j[4] = 0
     return np.array(out_boxes)
+
+
+def image2tensor(img):
+    assert isinstance(img, Image.Image)
+    transform = transforms.ToTensor()
+    img = transform(img).unsqueeze(0)
+    return img
+
+
+def drawrect(drawcontext, xy, outline=None, width=0):
+    x1, y1, x2, y2 = xy
+    points = (x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)
+    drawcontext.line(points, fill=outline, width=width)
+
+
+def drawtext(img, pos, text, bgcolor=(255, 255, 255), font=None):
+    if font is None:
+        font = ImageFont.load_default().font
+    (tw, th) = font.getsize(text)
+    box_img = Image.new('RGB', (tw+2, th+2), bgcolor)
+    ImageDraw.Draw(box_img).text((0, 0), text, fill=(0, 0, 0, 255), font=font)
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    sx, sy = pos[0], pos[1]-th-2
+    if sx < 0:
+        sx = 0
+    if sy < 0:
+        sy = 0
+    img.paste(box_img, (int(sx), int(sy)))
+
+
+def plot_boxes(img, boxes, savename=None, class_names=None):
+    colors = torch.FloatTensor([[1, 0, 1], [0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 1, 0], [1, 0, 0]])
+
+    def get_color(c, x, max_val):
+        ratio = float(x)/max_val * 5
+        i = int(math.floor(ratio))
+        j = int(math.ceil(ratio))
+        ratio = ratio - i
+        r = (1-ratio) * colors[i][c] + ratio*colors[j][c]
+        return int(r*255)
+
+    width = img.width
+    height = img.height
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arialbd", 14)
+    except Exception:
+        font = None
+    print("%d box(es) is(are) found" % len(boxes))
+    for i in range(len(boxes)):
+        box = boxes[i]
+        x1 = (box[0] - box[2]/2.0) * width
+        y1 = (box[1] - box[3]/2.0) * height
+        x2 = (box[0] + box[2]/2.0) * width
+        y2 = (box[1] + box[3]/2.0) * height
+
+        rgb = (255, 0, 0)
+        if len(box) >= 7 and class_names:
+            cls_conf = box[5]
+            cls_id = box[6]
+            print('%s: %f' % (class_names[int(cls_id)], cls_conf))
+            classes = len(class_names)
+            offset = cls_id * 123457 % classes
+            red = get_color(2, offset, classes)
+            green = get_color(1, offset, classes)
+            blue = get_color(0, offset, classes)
+            rgb = (red, green, blue)
+            text = "{} : {:.3f}".format(class_names[int(cls_id)], cls_conf)
+            drawtext(img, (x1, y1), text, bgcolor=rgb, font=font)
+        drawrect(draw, [x1, y1, x2, y2], outline=rgb, width=2)
+    if savename:
+        print("save plot results to %s" % savename)
+        img.save(savename)
+    return img
+
+
+def do_detect(model, img, conf_thresh, nms_thresh, use_cuda=False):
+    model.eval()
+    t0 = time.time()
+    img = image2tensor(img)
+    t1 = time.time()
+
+    img = img.to(torch.device("cuda" if use_cuda else "cpu"))
+    t2 = time.time()
+
+    out_boxes = model(img)
+
+    shape = (model.width, model.height)
+    boxes = get_all_boxes(out_boxes, shape, conf_thresh, model.num_classes)[0]
+
+    t3 = time.time()
+    boxes = nms(boxes, nms_thresh)
+    t4 = time.time()
+
+    if False:
+        print('-----------------------------------')
+        print(' image to tensor : %f' % (t1 - t0))
+        print('  tensor to cuda : %f' % (t2 - t1))
+        print('         predict : %f' % (t3 - t2))
+        print('             nms : %f' % (t4 - t3))
+        print('           total : %f' % (t4 - t0))
+        print('-----------------------------------')
+    return boxes
