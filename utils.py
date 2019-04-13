@@ -91,6 +91,32 @@ def cal_iou(box1, box2):
     return iou
 
 
+def cal_giou(box1, box2):
+    w1, h1 = box1[2], box1[3]
+    w2, h2 = box2[2], box2[3]
+    x_min = min(box1[0] - w1 / 2, box2[0] - w2 / 2)
+    x_max = max(box1[0] + w1 / 2, box2[0] + w2 / 2)
+    y_min = min(box1[1] - h1 / 2, box2[1] - h2 / 2)
+    y_max = max(box1[1] + h1 / 2, box2[1] + h2 / 2)
+
+    area1 = w1 * h1
+    area2 = w2 * h2
+
+    all_w = x_max - x_min
+    all_h = y_max - y_min
+
+    intersec_w = w1 + w2 - all_w
+    intersec_h = h1 + h2 - all_w
+
+    intersec = intersec_w * intersec_h if intersec_h > 0 and intersec_w > 0 else 0
+    union = w1 * h1 + w2 * h2 - intersec
+    iou = float(intersec / union)
+
+    closure = all_w * all_h
+
+    giou = iou - (closure - union) / closure
+    return giou
+
 def cal_ious(boxes1, boxes2):
     """
     Calculate ious between two box sets.
@@ -275,7 +301,8 @@ def nms(boxes, nms_thresh):
             out_boxes.append(box_i)
             for j in range(i+1, len(sortIndex)):
                 box_j = boxes[sortIndex[j]]
-                if cal_iou(box_i, box_j) > nms_thresh:
+                iou = cal_iou(box_i, box_j)
+                if iou > nms_thresh:
                     box_j[4] = 0
     return np.array(out_boxes)
 
