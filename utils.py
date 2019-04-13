@@ -254,7 +254,6 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20,
 
 
 def nms(boxes, nms_thresh):
-    boxes = [box for box in boxes if len(box)>0]
     res = []
     # transfer tensor to numpy matrix
     for box in boxes:
@@ -278,6 +277,47 @@ def nms(boxes, nms_thresh):
                 box_j = boxes[sortIndex[j]]
                 if cal_iou(box_i, box_j) > nms_thresh:
                     box_j[4] = 0
+    return np.array(out_boxes)
+
+
+def linear_penalty(s, iou, thresh):
+    if s > thresh:
+        return s*(1 - iou)
+    else:
+        return s
+
+
+def gaussian_penalty(s, iou, sigma=0.5):
+    return s * np.exp(-math.pow(iou, 2)/sigma)
+
+
+def soft_nms(boxes, nms_thresh):
+    res = []
+    # transfer tensor to numpy matrix
+    for box in boxes:
+        temp = []
+        for item in box:
+            if torch.is_tensor(item):
+                item = float(item.numpy())
+            temp.append(item)
+        res.append(temp)
+    boxes = res
+    conf = np.zeros(len(boxes))
+    for i in range(len(boxes)):
+        conf[i] = boxes[i][4]
+    sortIndex = list(reversed(np.argsort(conf)))
+    for i in range(len(sortIndex)):
+        box_i = boxes[sortIndex[i]]
+        for j in range(i + 1, len(sortIndex)):
+            box_j = boxes[sortIndex[j]]
+            iou = cal_iou(box_i, box_j)
+            conf[sortIndex[j]] = linear_penalty(conf[sortIndex[j]], iou, thresh=0.4)
+            # conf[sortIndex[j]] = gaussian_penalty(conf[sortIndex[j]], iou, sigma=0.5)
+            box_j[4] = conf[sortIndex[j]]
+    out_boxes = []
+    for box in boxes:
+        if box[4] > nms_thresh:
+            out_boxes.append(box)
     return np.array(out_boxes)
 
 
@@ -371,6 +411,7 @@ def do_detect(model, img, conf_thresh, nms_thresh, use_cuda=False):
     boxes = get_all_boxes(out_boxes, shape, conf_thresh, model.num_classes)[0]
 
     t3 = time.time()
+    # boxes = soft_nms(boxes, nms_thresh)
     boxes = nms(boxes, nms_thresh)
     t4 = time.time()
 
