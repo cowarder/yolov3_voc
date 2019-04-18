@@ -175,7 +175,7 @@ def read_class_names(classfile):
     return name_list
 
 
-def get_all_boxes(result, net_shape, conf_thresh, num_classes, device='cpu'):
+def get_all_boxes(result, net_shape, conf_thresh, num_classes, device='cpu', validation=False):
     """
     combine three scale prediction boxes
     :param result: three scale prediction of yolo layers
@@ -190,13 +190,13 @@ def get_all_boxes(result, net_shape, conf_thresh, num_classes, device='cpu'):
     for i in range(len(result)):
         output = result[i]['output'].data
         anchors = result[i]['anchors']
-        b = get_yolo_boxes(output, net_shape, anchors, conf_thresh, num_classes, device)
+        b = get_yolo_boxes(output, net_shape, anchors, conf_thresh, num_classes, device, validation)
         for j in range(nB):
             all_boxes[j] += b[j]
     return all_boxes
 
 
-def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20, device='cpu'):
+def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20, device='cpu', validation=False):
     """
     one scale prediction boxes
     :param output: one scale prediction
@@ -274,6 +274,13 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20,
                         bw = target_box[2]
                         bh = target_box[3]
                         box = [bx / nW, by / nH, bw / net_w, bh / net_h, target_conf, cls_max_conf, cls_max_id]
+                        if validation:
+                            # put other predictions in there
+                            for c in range(num_classes):
+                                tmp_conf = cls_conf[index][c]
+                                if c != cls_max_id and target_conf*tmp_conf > conf_thresh:
+                                    box.append(tmp_conf)
+                                    box.append(c)
                         boxes.append(box)
         all_boxes.append(boxes)
     return all_boxes
@@ -451,3 +458,25 @@ def do_detect(model, img, conf_thresh, nms_thresh, use_cuda=False):
         print('           total : %f' % (t4 - t0))
         print('-----------------------------------')
     return boxes
+
+
+def correct_yolo_boxes(boxes, im_w, im_h, net_w, net_h):
+    # 网络(net_w, net_h)中与im_w, im_h比率较大的做微调
+    im_w, im_h = float(im_w), float(im_h)
+    net_w, net_h = float(net_w), float(net_h)
+    if net_w/im_w < net_h/im_h:
+        new_w = net_w
+        new_h = (im_h * net_w)/im_w
+    else:
+        new_w = (im_w * net_h)/im_h
+        new_h = net_h
+
+    xo, xs = (net_w - new_w)/(2*net_w), net_w/new_w
+    yo, ys = (net_h - new_h)/(2*net_h), net_h/new_h
+    for i in range(len(boxes)):
+        b = boxes[i]
+        b[0] = (b[0] - xo) * xs
+        b[1] = (b[1] - yo) * ys
+        b[2] *= xs
+        b[3] *= ys
+    return
