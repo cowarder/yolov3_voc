@@ -117,6 +117,7 @@ def cal_giou(box1, box2):
     giou = iou - (closure - union) / closure
     return giou
 
+
 def cal_ious(boxes1, boxes2):
     """
     Calculate ious between two box sets.
@@ -227,7 +228,6 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20,
 
     # confidence
     confs = output.index_select(2, ix[4]).view(cls_anchor_dim).sigmoid().to(device)
-
 
     # class
     cls = output.index_select(2, cls_grid).view(nB * nA, nC, nW * nH) \
@@ -356,9 +356,13 @@ def soft_nms(boxes, nms_thresh):
 
 
 def image2tensor(img):
-    assert isinstance(img, Image.Image)
-    transform = transforms.ToTensor()
-    img = transform(img).unsqueeze(0)
+    if isinstance(img, Image.Image):        # PIL.Image
+        transform = transforms.ToTensor()
+        img = transform(img).unsqueeze(0)
+    elif type(img) == np.ndarray:             # Opencv
+        img = torch.from_numpy(img.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0)
+    else:
+        print('Unknown image type')
     return img
 
 
@@ -480,3 +484,47 @@ def correct_yolo_boxes(boxes, im_w, im_h, net_w, net_h):
         b[2] *= xs
         b[3] *= ys
     return
+
+
+def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
+    import cv2
+    colors = torch.FloatTensor([[1, 0, 1], [0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 1, 0], [1, 0, 0]])
+
+    def get_color(c, x, max_val):
+        ratio = float(x)/max_val * 5
+        i = int(math.floor(ratio))
+        j = int(math.ceil(ratio))
+        ratio = ratio - i
+        r = (1-ratio) * colors[i][c] + ratio*colors[j][c]
+        return int(r*255)
+
+    width = img.shape[1]
+    height = img.shape[0]
+    for i in range(len(boxes)):
+        box = boxes[i]
+        x1 = int(round((box[0] - box[2]/2.0) * width))
+        y1 = int(round((box[1] - box[3]/2.0) * height))
+        x2 = int(round((box[0] + box[2]/2.0) * width))
+        y2 = int(round((box[1] + box[3]/2.0) * height))
+
+        if color:
+            rgb = color
+        else:
+            rgb = (255, 0, 0)
+        if len(box) >= 7 and class_names:
+            cls_conf = box[5]
+            cls_id = int(box[6])
+            # print('%s: %f' % (class_names[cls_id], cls_conf))
+            classes = len(class_names)
+            offset = cls_id * 123457 % classes
+            red = get_color(2, offset, classes)
+            green = get_color(1, offset, classes)
+            blue = get_color(0, offset, classes)
+            if color is None:
+                rgb = (red, green, blue)
+            img = cv2.putText(img, class_names[cls_id], (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1.2, rgb, 1)
+        img = cv2.rectangle(img, (x1, y1), (x2, y2), rgb, 1)
+    if savename:
+        print("save plot results to %s" % savename)
+        cv2.imwrite(savename, img)
+    return img
