@@ -11,12 +11,12 @@ import sys
 import dataset
 import torch.optim as optim
 import argparse
-from yolo_voc.darknet import Darknet
+from darknet import Darknet
 from utils import *
 from tqdm import tqdm
 
 use_cuda = True if torch.cuda.is_available() else False
-device = 'cpu'  # ''cuda' if use_cuda else 'cpu'
+device = 'cuda' if use_cuda else 'cpu'
 
 FLAGS = None
 conf_thresh = 0.25
@@ -45,39 +45,46 @@ def test(batch_idx):
     net_h = model.height
     nC = int(model.num_classes)
     with torch.no_grad():
-        for imgs, labels, org_w, org_h in tqdm(test_loader):
-            imgs = imgs.to(device)
-            labels = labels.to(device)
+        try:
+            with tqdm(test_loader) as t:
+                for imgs, labels, org_w, org_h in t:
+                    imgs = imgs.to(device)
+                    labels = labels.to(device)
 
-            output = model(imgs)
-            all_boxes = get_all_boxes(output, (net_w, net_h), conf_thresh, nC)
+                    output = model(imgs)
+                    all_boxes = get_all_boxes(output, (net_w, net_h), conf_thresh, nC)
 
-            # for every single image
-            for i in range(len(all_boxes)):
-                boxes = all_boxes[i]
-                correct_yolo_boxes(boxes, org_w[i], org_h[i], model.width, model.height)
-                boxes = np.array(nms(boxes, nms_thresh=nms_thresh))
+                    # for every single image
+                    for i in range(len(all_boxes)):
+                        boxes = all_boxes[i]
+                        correct_yolo_boxes(boxes, org_w[i], org_h[i], model.width, model.height)
+                        boxes = np.array(nms(boxes, nms_thresh=nms_thresh))
 
-                num_pred = len(boxes)
-                if num_pred == 0:
-                    continue
-                truths = labels[i].view(-1, 5)
-                num_gts = truth_length(truths)
-                total += num_gts
-                proposals += (boxes[: 4] > 0).sum()
+                        num_pred = len(boxes)
+                        if num_pred == 0:
+                            continue
+                        truths = labels[i].view(-1, 5)
+                        num_gts = truth_length(truths)
+                        total += num_gts
+                        proposals += (boxes[: 4] > 0).sum()
 
-                for k in range(num_gts):
-                    gt_box = torch.FloatTensor([truths[k][1], truths[k][2],
-                                                truths[k][3], truths[k][4], 1.0, 1.0, truths[k][0]])
-                    gt_box = gt_box.repeat(num_pred, 1).t()
-                    pred_box = torch.FloatTensor(boxes).t()
-                    best_iou, best_j = torch.max(cal_ious(gt_box, pred_box), 0)
-                    if best_iou > iou_thresh and pred_box[6][best_j] == gt_box[6][0]:
-                        correct += 1
+                        for k in range(num_gts):
+                            gt_box = torch.FloatTensor([truths[k][1], truths[k][2],
+                                                        truths[k][3], truths[k][4], 1.0, 1.0, truths[k][0]])
+                            gt_box = gt_box.repeat(num_pred, 1).t()
+                            pred_box = torch.FloatTensor(boxes).t()
+                            best_iou, best_j = torch.max(cal_ious(gt_box, pred_box), 0)
+                            if best_iou > iou_thresh and pred_box[6][best_j] == gt_box[6][0]:
+                                correct += 1
+        except KeyboardInterrupt:
+            t.close()
+            raise
+        t.close()
     precision = 1.0 * correct / (proposals + eps)
     recall = 1.0 * correct / (total + eps)
     fscore = 2.0 * precision * recall / (precision + recall)
-    print('precision:{:2f}, recall:{:2f}, fscore:{:2f}'.format(precision, recall, fscore))
+    print('batch:{} precision:{:2f}, recall:{:2f}, fscore:{:2f}'.format(batch_idx, precision, recall, fscore))
+    save_logging('precision:{:2f}, recall:{:2f}, fscore:{:2f}'.format(precision, recall, fscore))
     return correct, fscore
 
 
@@ -100,7 +107,7 @@ def main():
     saturation = float(net_options['saturation'])
     momentum = float(net_options['momentum'])
 
-    epochs = 10
+    epochs = 100
 
     model = Darknet(FLAGS.config)
     torch.manual_seed(0)
@@ -109,7 +116,7 @@ def main():
         torch.cuda.manual_seed(0)
 
     model = model.to(device)
-    model.load_weights(weightfile="data/model.weights")
+    model.load_weights(weightfile="model.weights")
     loss_layers = model.loss_layers
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
@@ -128,21 +135,20 @@ def main():
             optimizer.zero_grad()
             output = model(images)
             org_loss = []
+            org_loss = []
             for i, l in enumerate(loss_layers):
                 l.seen += labels.data.size(0)
                 ol = l(output[i]['output'], labels)
                 org_loss.append(ol)
             sum(org_loss).backward()
             optimizer.step()
-            if (idx + 1) % 2 == 0:
-                test(idx)
-            if (idx + 1) % 250 == 0:
-                model.save_weights('data/model.weights')
-                # print('Model saved.')
-                model.eval()
+            # if (idx + 1) % 250 == 0:
+            #     model.save_weights('models/batch_{}.weights'.format(idx))
+            #     print('Model saved.')
+            #     # test(idx)
 
-        model.save_weights('data/model.weights')
-        print('Model saved.')
+        model.save_weights('models/epoch_{}.weights'.format(epoch))
+        print('Epoch_{:d} model saved.'.format(epoch + 1))
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from .utils import *
+from utils import *
 import math
 import sys
 # from torchsummary import summary
@@ -34,7 +34,7 @@ class UpSample(nn.Module):
 
 class YoloLayer(nn.Module):
 
-    def __init__(self, num_classes=20, anchors=[], use_cuda=None):
+    def __init__(self, num_classes=20, anchors=[]):
         super(YoloLayer, self).__init__()
 
         self.num_classes = num_classes                      # 类别数目
@@ -46,8 +46,8 @@ class YoloLayer(nn.Module):
         self.seen = 0
         self.net_width = 416
         self.net_width = 416
-        self.use_cuda = use_cuda
-        self.device = 'cuda' if use_cuda else 'cpu'
+        self.use_cuda = True if torch.cuda.is_available() else False
+        self.device = 'cuda' if self.use_cuda else 'cpu'
         self.nth_layer = 0
 
     def build_targets(self, pred_boxes, target, anchors, nA, nH, nW):
@@ -74,7 +74,7 @@ class YoloLayer(nn.Module):
         nRecall = 0
         nRecall75 = 0
 
-        anchors = anchors.to("cpu")
+        anchors = anchors.to('cpu')
 
         # for every image
         for b in range(nB):
@@ -116,7 +116,7 @@ class YoloLayer(nn.Module):
                 pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
                 iou = cal_iou(gt_box, pred_box)
                 # pred_box get inf value, so code crashed
-                #if math.isnan(iou):
+                # if math.isnan(iou):
                 #    print(gt_box, pred_box)
                 #    print(torch.isnan(pred_boxes.detach()).sum().item())
 
@@ -140,8 +140,8 @@ class YoloLayer(nn.Module):
         nB = output.data.size(0)                            # batch size
         nA = len(self.anchors)                              # anchor num
         nC = self.num_classes                               # class num
-        nH = output.data.size(2)                            # grid num along y axis
-        nW = output.data.size(3)                            # grid num along x axis
+        nW = output.data.size(2)                            # grid num along y axis
+        nH = output.data.size(3)                            # grid num along x axis
         anchors = torch.FloatTensor(self.anchors).view(nA, -1).to(self.device)
         cls_anchor_dim = nB * nA * nH * nW
 
@@ -177,7 +177,6 @@ class YoloLayer(nn.Module):
         pred_boxes[1] = coord[1] + grid_y
         pred_boxes[2] = coord[2].exp() * anchor_w
         pred_boxes[3] = coord[3].exp() * anchor_h
-
 
         pred_boxes = convert2cpu(pred_boxes.transpose(0, 1).contiguous().view(-1, 4)).detach()
 
@@ -217,7 +216,8 @@ class YoloLayer(nn.Module):
         return loss
 
     def get_mask_boxes(self, x):
-        return x
+        # x(batchsize, x+y+w+h+conf+num_classes,grid,grid)
+        return {'output': x, 'anchors': self.anchors}
 
 
 class Darknet(nn.Module):
@@ -228,7 +228,8 @@ class Darknet(nn.Module):
         self.models = self.create_modules(self.blocks)
         self.loss_layers = self.get_loss_layers()
         self.seen = 0
-        self.header = None
+        self.header = torch.IntTensor([0, 1, 0, 0, 0])
+        self.num_classes = int(self.loss_layers[0].num_classes)
 
     def get_loss_layers(self):
         loss_layers = []
@@ -345,7 +346,7 @@ class Darknet(nn.Module):
                 yolo_layer.net_width = self.width
                 yolo_layer.net_height = self.height
                 yolo_layer.nth_layer = index
-                #module.add_module('yolo_{0}'.format(index), yolo_layer)
+                # module.add_module('yolo_{0}'.format(index), yolo_layer)
                 module.add_module('yolo_{0}'.format(index), yolo_layer)
 
             models.append(module)
@@ -364,7 +365,7 @@ class Darknet(nn.Module):
 
             header = np.fromfile(f, dtype=np.int32, count=5)
             self.header = torch.from_numpy(header)
-            self.seen = self.header[3]
+            self.seen = int(self.header[3])
 
             weights = np.fromfile(f, dtype=np.float32)
 
@@ -432,13 +433,15 @@ class Darknet(nn.Module):
                 conv_weights = torch.from_numpy(weights[ptr:ptr + num_weights])
                 ptr = ptr + num_weights
 
+                # print(num_weights, len(conv_weights))
+
                 conv_weights = conv_weights.view_as(conv.weight.data)
                 conv.weight.data.copy_(conv_weights)
         # print(ptr, len(weights))
 
     def save_weights(self, outfile):
         with open(outfile, 'wb') as f:
-            self.header[3] = self.seen
+            self.header[3] = int(self.seen)
             header = np.array(self.header.numpy(), np.int32)
             header.tofile(f)
 
@@ -464,7 +467,7 @@ class Darknet(nn.Module):
                             bn.weight.data.numpy().tofile(f)
                             bn.running_mean.data.numpy().tofile(f)
                             bn.running_var.data.numpy().tofile(f)
-                            bn.weight.data.numpy().tofile(f)
+                            conv.weight.data.numpy().tofile(f)
                     else:
                         conv = model[0]
                         if conv.bias.is_cuda:
@@ -485,9 +488,10 @@ class Darknet(nn.Module):
                 else:
                     print("Unknown layer type:{}".format(self.blocks[i+1]['type']))
 
-
+"""
 if __name__=="__main__":
     darknet = Darknet("./data/yolo_v3.cfg")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     darknet = darknet.to(device)
-    #summary(darknet, (3, 416, 416))
+    # summary(darknet, (3, 416, 416))
+"""

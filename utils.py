@@ -5,6 +5,7 @@ import torch
 import os
 import numpy as np
 import pdb
+import time
 import math
 import time
 from PIL import Image, ImageDraw, ImageFont
@@ -71,8 +72,8 @@ def cal_iou(box1, box2):
     :param box2: anchorbox (x,y,w,h).t()
     :return: iou
     """
-    w1, h1= box1[2], box1[3]
-    w2, h2= box2[2], box2[3]
+    w1, h1 = box1[2], box1[3]
+    w2, h2 = box2[2], box2[3]
     x_min = min(box1[0] - w1 / 2, box2[0] - w2 / 2)
     x_max = max(box1[0] + w1 / 2, box2[0] + w2 / 2)
     y_min = min(box1[1] - h1 / 2, box2[1] - h2 / 2)
@@ -99,9 +100,6 @@ def cal_giou(box1, box2):
     x_max = max(box1[0] + w1 / 2, box2[0] + w2 / 2)
     y_min = min(box1[1] - h1 / 2, box2[1] - h2 / 2)
     y_max = max(box1[1] + h1 / 2, box2[1] + h2 / 2)
-
-    area1 = w1 * h1
-    area2 = w2 * h2
 
     all_w = x_max - x_min
     all_h = y_max - y_min
@@ -446,8 +444,9 @@ def do_detect(model, img, conf_thresh, nms_thresh, use_cuda=False):
 
     out_boxes = model(img)
 
+    device = 'cuda' if use_cuda else 'cpu'
     shape = (model.width, model.height)
-    boxes = get_all_boxes(out_boxes, shape, conf_thresh, model.num_classes)[0]
+    boxes = get_all_boxes(out_boxes, shape, conf_thresh, model.num_classes, device=device)[0]
 
     t3 = time.time()
     # boxes = soft_nms(boxes, nms_thresh)
@@ -513,7 +512,7 @@ def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
         else:
             rgb = (255, 0, 0)
         if len(box) >= 7 and class_names:
-            cls_conf = box[5]
+            # cls_conf = box[5]
             cls_id = int(box[6])
             # print('%s: %f' % (class_names[cls_id], cls_conf))
             classes = len(class_names)
@@ -529,3 +528,8 @@ def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
         print("save plot results to %s" % savename)
         cv2.imwrite(savename, img)
     return img
+
+
+def save_logging(m):
+    with open('logging.txt', 'a') as f:
+        print("{} {}".format(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()), m), file=f)
