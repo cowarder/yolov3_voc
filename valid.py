@@ -2,25 +2,28 @@ import torch
 from torchvision import transforms
 import sys
 import os
+import shutil
+import time
 from torch.utils.data import DataLoader, Dataset
 from dataset import YoloDataset
-from yolo_voc.darknet import Darknet
+from darknet import Darknet
 from utils import read_data_file, read_class_names, get_all_boxes, correct_yolo_boxes, nms
 
 
-def valid(datafile, cfgfile, weightfile):
+def valid(datafile, cfgfile, weightfile, prefix='result'):
     model = Darknet(cfgfile)
     options = read_data_file(datafile)
     data_root = options['valid']
     class_root = options['names']
     names = read_class_names(class_root)
 
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     with open(data_root, 'r') as f:
         lines = f.readlines()
         valid_files = [item.strip() for item in lines]
 
     model.load_weights(weightfile)
-    device = 'cpu' # 'gpu' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
     model.eval()
 
@@ -29,13 +32,14 @@ def valid(datafile, cfgfile, weightfile):
                        transform=transforms.Compose([transforms.ToTensor()]),
                        train=False)
     batch_size = 2
-    data_loader = DataLoader(data, batch_size=batch_size, shuffle=False, num_workers=4)
+    kwargs = {'num_workers': 4, 'pin_memory': True}
+    data_loader = DataLoader(data, batch_size=batch_size, shuffle=False, **kwargs)
 
     fs = [None] * model.num_classes
-    if not os.path.exists('result'):
-        os.mkdir('result')
+    if not os.path.exists(prefix):
+        os.makedirs(prefix)
     for i in range(model.num_classes):
-        filename = 'result/' + str(names[i]) + '.txt'
+        filename = prefix + '/' + str(names[i]) + '.txt'
         fs[i] = open(filename, 'w')
     net_shape = (model.width, model.height)
 
@@ -47,12 +51,12 @@ def valid(datafile, cfgfile, weightfile):
         imgs = imgs.to(device)
         output = model(imgs)
 
-        batch_boxes = get_all_boxes(output, net_shape, conf_thresh, model.num_classes, validation=True)
+        batch_boxes = get_all_boxes(output, net_shape, conf_thresh, model.num_classes, device, validation=True)
 
         for i in range(len(batch_boxes)):
             fileId = os.path.basename(valid_files[fileIndex]).split('.')[0]    # gei naive image name without suffix
             w, h = float(org_w[i]), float(org_h[i])
-            print(valid_files[fileIndex], '{}/{}'.format(fileIndex+1, len(data_loader)*batch_size))
+            # print(valid_files[fileIndex], '{}/{}'.format(fileIndex+1, len(data_loader) * batch_size))
             fileIndex += 1
             boxes = batch_boxes[i]
             correct_yolo_boxes(boxes, w, h, model.width, model.height)
@@ -75,14 +79,33 @@ def valid(datafile, cfgfile, weightfile):
         fs[i].close()
 
 
-if __name__=='__main__':
-    if len(sys.argv)!=4:
-        print('use command like:'
-              'python valid.py your.data your.cfg your.weights')
+def main():
+    datafile = 'data/voc.data'
+    cfgfile = 'data/yolo_v3.cfg'
+    weightfile = 'model.weights'
 
+    if not os.path.exists('result/'):
+        pass
     else:
-        datafile = sys.argv[1]
-        cfgfile = sys.argv[2]
-        weightfile = sys.argv[3]
-        valid(datafile, cfgfile, weightfile)
-        # %run valid.py data/voc.data data/yolo_v3.cfg data/model.weights
+        shutil.rmtree('result/')
+    os.makedirs('result')
+
+    # vallid one model
+    # valid(datafile, cfgfile, weightfile)
+
+    # valid all models
+    r = list(range(-1, 100, 10))
+    r[0] = 0
+    for i in r:
+        print('validating epoch_{}.'.format(i))
+        print(time.strftime('%Y.%m.%d %H:%M:%S', time.localtime(time.time())))
+        prefix = 'result/epoch_' + str(i)
+        weightfile = 'models/epoch_' + str(i) + '.weights'
+        valid(datafile, cfgfile, weightfile, prefix)
+        print(time.strftime('%Y.%m.%d %H:%M:%S', time.localtime(time.time())))
+        print('validating epoch_{} done.'.format(i))
+
+
+if __name__ == '__main__':
+    main()
+    # %run valid.py data/voc.data data/yolo_v3.cfg data/model.weights
