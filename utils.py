@@ -4,12 +4,47 @@
 import torch
 import os
 import numpy as np
+import pandas as pd
 import pdb
 import time
 import math
 import time
 from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
+from sklearn.naive_bayes import GaussianNB
+
+
+
+def get_reg_model():
+
+    with open('bb_gt_relation.txt', 'r') as f:
+        lines = f.readlines()
+    lines = [s.strip().split() for s in lines]
+    lines = [[int(x[0]), int(x[1]), float(x[2]), float(x[3]), float(x[4]), float(x[5])] for x in lines]
+    lines = [line for line in lines if '{:.2f}'.format(line[5]) != '0.75']
+    lines = sorted(lines, key=lambda x: x[1])
+    # print(len([x for x in lines if x[0] > 50]))
+
+    bb_num = [x[0] for x in lines]
+    gt_num = [x[1] for x in lines]
+    recall = [x[2] for x in lines]
+    precision = [x[3] for x in lines]
+    fscore = [x[4] for x in lines]
+    thresh = [x[5] for x in lines]
+
+    df = pd.DataFrame(columns=['gt_num', 'bb_num', 'recall', 'precision', 'fscore', 'thresh'])
+    df['bb_num'] = bb_num
+    df['gt_num'] = gt_num
+    df['recall'] = recall
+    df['precision'] = precision
+    df['fscore'] = fscore
+    df['thresh'] = thresh
+
+    reg = GaussianNB()
+    bb_num = [[x] for x in bb_num]
+    thresh = [int(x * 100) for x in thresh]
+    reg.fit(bb_num, thresh)
+    return reg
 
 
 def parse_cfg(cfgfile):
@@ -286,13 +321,23 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20,
 
 
 def nms(boxes, nms_thresh):
+
+    def get_thresh(box_len):
+        if box_len > 100:
+            return 0.4
+        else:
+            return 0.03165 * box_len + 0.088672
+
+    # nms_thresh = get_reg_model().predict([[len(boxes)]])[0] / 100
+    box_len = len(boxes)
+    # nms_thresh = get_thresh(box_len)
     res = []
-    # transfer tensor to numpy matrix
+    # transfer tensor to numpys matrix
     for box in boxes:
         temp = []
         for item in box:
             if torch.is_tensor(item):
-                item = float(item.numpy())
+                item = float(item.cpu().data.numpy())
             temp.append(item)
         res.append(temp)
     boxes = res
