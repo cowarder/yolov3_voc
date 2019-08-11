@@ -166,6 +166,7 @@ def letter_image(img, net_w, net_h):
     lbImage.paste(resized, ((net_w - new_w) // 2, (net_h - new_h) // 2, (net_w + new_w) // 2, (net_h + new_h) // 2))
     return lbImage
 
+
 # if __name__ == "__main__":
 #     for i in range(10):
 #        img = load_data_detection("000002.jpg", (416, 416), 0.3, 0.1, 1.5, 1.5)

@@ -27,8 +27,9 @@ def detect(cfgfile, weightfile, imgfile, namefile):
 
 if __name__ == '__main__':
     cfgfile = 'data/yolo_v3.cfg'
-    weightfile = 'models/epoch_4.weights'
+    weightfile = 'models_scratch/epoch_40.weights'
     # weightfile = 'data/model.weights'
-    imgfile = "data/VOCtest_06-Nov-2007/VOCdevkit/VOC2007/JPEGImages/000369.jpg"
+    imgfile = "data/VOCtest_06-Nov-2007/VOCdevkit/VOC2007/JPEGImages/000124.jpg"
+    imgfile = "data/VOCtrainval_06-Nov-2007/VOCdevkit/VOC2007/JPEGImages/009855.jpg"
     namefile = 'data/voc.names'
     detect(cfgfile, weightfile, imgfile, namefile)

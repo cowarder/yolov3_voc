@@ -116,7 +116,7 @@ def main():
         torch.cuda.manual_seed(0)
 
     model = model.to(device)
-    model.load_weights(weightfile="model.weights")
+    model.load_weights(weightfile="data/yolov3.weights")
     loss_layers = model.loss_layers
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
@@ -147,7 +147,7 @@ def main():
             #     print('Model saved.')
             #     # test(idx)
 
-        model.save_weights('models/epoch_{}.weights'.format(epoch))
+        model.save_weights('models_scratch/epoch_{}.weights'.format(epoch+1))
         print('Epoch_{:d} model saved.'.format(epoch + 1))
 
 

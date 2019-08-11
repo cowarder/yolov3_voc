@@ -14,7 +14,6 @@ from torchvision import transforms
 from sklearn.naive_bayes import GaussianNB
 
 
-
 def get_reg_model():
 
     with open('bb_gt_relation.txt', 'r') as f:
@@ -321,15 +320,42 @@ def get_yolo_boxes(output, net_shape, anchors, conf_thresh=0.25, num_classes=20,
 
 
 def nms(boxes, nms_thresh):
+    res = []
+    # transfer tensor to numpys matrix
+    for box in boxes:
+        temp = []
+        for item in box:
+            if torch.is_tensor(item):
+                item = float(item.cpu().data.numpy())
+            temp.append(item)
+        res.append(temp)
+    boxes = res
+    conf = np.zeros(len(boxes))
+    for i in range(len(boxes)):
+        conf[i] = boxes[i][4]
+    sortIndex = list(reversed(np.argsort(conf)))
+    out_boxes = []
+    for i in range(len(sortIndex)):
+        box_i = boxes[sortIndex[i]]
+        if box_i[4] > 0:
+            out_boxes.append(box_i)
+            for j in range(i+1, len(sortIndex)):
+                box_j = boxes[sortIndex[j]]
+                iou = cal_iou(box_i, box_j)
+                if iou > nms_thresh:
+                    box_j[4] = 0
+    return np.array(out_boxes)
 
+
+def auto_thresh_nms(boxes, NB_model):
     def get_thresh(box_len):
         if box_len > 100:
             return 0.4
         else:
             return 0.03165 * box_len + 0.088672
 
-    # nms_thresh = get_reg_model().predict([[len(boxes)]])[0] / 100
-    box_len = len(boxes)
+    nms_thresh = NB_model.predict([[len(boxes)]])[0] / 100
+    # box_len = len(boxes)
     # nms_thresh = get_thresh(box_len)
     res = []
     # transfer tensor to numpys matrix

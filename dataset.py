@@ -38,7 +38,6 @@ class YoloDataset(Dataset):
             img = Image.open(imgpath).convert('RGB')
             if self.shape:
                 img, org_w, org_h = letter_image(img, self.shape[0], self.shape[1]), img.width, img.height
-
             labpath = imgpath.replace('images', 'labels').replace('JPEGImages', 'labels')\
                 .replace('.jpg', '.txt').replace('.png', '.txt')
             label = torch.zeros(50 * 5)
@@ -46,7 +45,6 @@ class YoloDataset(Dataset):
                 tmp = torch.from_numpy(read_truths_args(labpath, 8.0 / img.width).astype('float32'))
             except Exception:
                 tmp = torch.zeros(1, 5)
-
             tmp = tmp.view(-1)
             tsz = tmp.numel()           # element number
             if tsz > 50 * 5:

@@ -5,10 +5,16 @@ from PIL import Image
 from tqdm import tqdm
 import torch
 import pandas as pd
+import shutil
 from scipy import stats
 from sklearn import linear_model
-from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import GaussianNB, MultinomialNB
+from sklearn import svm
+from sklearn.externals import joblib
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
 import matplotlib.pyplot as plt
+
 
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
@@ -16,7 +22,7 @@ plt.rcParams['axes.unicode_minus'] = False
 eps = 1e-5
 
 
-def get_num_file():
+def get_num_file(weight_file, output_file):
     global eps
 
     def truth_length(truths):
@@ -27,13 +33,13 @@ def get_num_file():
 
     global model
     model = Darknet('data/yolo_v3.cfg')
-    model.load_weights('models_scratch/epoch_40.weights')
+    model.load_weights(weight_file)
     model.eval()
     use_cuda = True if torch.cuda.is_available() else False
     device = 'cuda' if use_cuda else 'cpu'
     model = model.to(device)
 
-    with open("bb_gt_relation.txt", 'w') as f:
+    with open(output_file, 'w') as f:
         img_ids = open("./data/VOCtrainval_06-Nov-2007/VOCdevkit/VOC2007/ImageSets/Main/trainval.txt", ) \
             .read().strip().split()
         for id in tqdm(img_ids):
@@ -73,9 +79,10 @@ def get_num_file():
             best_fscore = 0.0
             best_recall = 0.0
             best_precision = 0.0
-            besf_thresh = 0.4
+            besf_thresh = 0.45
+            num_gts = 0
             correct_yolo_boxes(boxes, org_w, org_h, model.width, model.height)
-            for nms_thresh in np.arange(0.1, 0.91, 0.02):    # np.arange(0.1, 0.8, 0.05):
+            for nms_thresh in np.arange(0.45, 0.6, 0.01):    # np.arange(0.1, 0.8, 0.05):
                 nms_thresh = float('{:.2f}'.format(nms_thresh))
                 correct = 0.0
 
@@ -105,13 +112,13 @@ def get_num_file():
                 # print('correct:{}'.format(correct))
                 # print('proposals:{}'.format(proposals))
                 # print('total:{}'.format(total))
-                if precision > best_precision:
+                if fscore > best_fscore:
                     best_fscore = fscore
                     best_precision = precision
                     best_recall = recall
                     besf_thresh = nms_thresh
             # if besf_thresh == 0.1 and num_gts > 5:
-            print(label_path, total, correct, besf_thresh)
+            # print(label_path, total, correct, besf_thresh)
             # print(str(num_bbs) + " " + str(num_gts) + " " + str(besf_thresh))
             f.write(str(num_bbs) + " " + str(num_gts) + " " + str(best_recall) + " " + str(best_precision) +
                     " " + str(best_fscore) + ' ' + str(besf_thresh) + '\n')
@@ -172,9 +179,9 @@ def linear_analysis():
     # plt.show()
 
 
-def get_reg_model():
+def get_reg_model(bb_gt_file):
 
-    with open('bb_gt_relation.txt', 'r') as f:
+    with open(bb_gt_file, 'r') as f:
         lines = f.readlines()
     lines = [s.strip().split() for s in lines]
     lines = [[int(x[0]), int(x[1]), float(x[2]), float(x[3]), float(x[4]), float(x[5])] for x in lines]
@@ -231,6 +238,10 @@ def get_reg_model():
 
     # bayes model analysis sbetween bb_num and thresh
     reg = GaussianNB()
+    # reg = svm.SVC()
+    # reg = MultinomialNB()
+    # reg = RandomForestClassifier()
+    # reg = KNeighborsClassifier(5)
     bb_num = [[x] for x in bb_num]
     thresh = [int(x * 100) for x in thresh]
     reg.fit(bb_num, thresh)
@@ -238,12 +249,72 @@ def get_reg_model():
     #     print(reg.predict([[i]])[0]/100)
     return reg
 
-#
-# def main():
-#     # get_num_file()
-#     # linear_analysis()
-#     model = get_reg_model()
-#
-#
-# if __name__=='__main__':
-#     main()
+
+def visulize_validation(validation_file='validation.txt'):
+    with open(validation_file, 'r') as f:
+        lines = f.readlines()
+    lines = [x.strip().split() for x in lines]
+    lines = [[int(x[0]), float(x[1])] for x in lines]
+    lines = sorted(lines, key=lambda x: x[0])
+    epoch = [x[0] for x in lines]
+    mAP = [x[1] for x in lines]
+    plt.plot(epoch, mAP)
+    plt.show()
+
+
+def visulize_2_validation(validation_file1='validation.txt', validation_file2='validation_my.txt'):
+    with open(validation_file1, 'r') as f:
+        lines = f.readlines()
+    lines = [x.strip().split() for x in lines]
+    lines = [[int(x[0]), float(x[1])] for x in lines]
+    lines = sorted(lines, key=lambda x: x[0])
+    epoch = [x[0] for x in lines]
+    mAP = [x[1] for x in lines]
+    plt.plot(epoch, mAP, 'b')
+
+    map1 = sum(mAP)
+    with open(validation_file2, 'r') as f:
+        lines = f.readlines()
+    lines = [x.strip().split() for x in lines]
+    lines = [[int(x[0]), float(x[1])] for x in lines]
+    lines = sorted(lines, key=lambda x: x[0])
+    epoch = [x[0] for x in lines]
+    mAP = [x[1] for x in lines]
+    plt.plot(epoch, mAP, 'r')
+    plt.show()
+    map2 = sum(mAP)
+    print(map1 / 50, map2 / 50)
+
+def get_bb_thresh_files():
+    # if os.path.exists('gt_thresh_info'):
+    #     shutil.rmtree('gt_thresh_info')
+    # os.makedirs('gt_thresh_info')
+    for epoch in list(np.arange(36, 41, 4)):
+        weight_file = 'models_scratch/epoch_' + str(epoch) + '.weights'
+        output_file = 'gt_thresh_info/epoch_' + str(epoch) + '.txt'
+        print(weight_file, output_file)
+        get_num_file(weight_file, output_file)
+
+
+def get_bb_thresh_models(out_dir='NB models'):
+    if os.path.exists(out_dir):
+       shutil.rmtree(out_dir)
+    os.makedirs(out_dir)
+    for epoch in tqdm(list(np.arange(36, 41, 4))):
+        file_name = 'gt_thresh_info/epoch_' + str(epoch) + '.txt'
+        reg = get_reg_model(file_name)
+        joblib.dump(reg, '{}/epoch_{}.pkl'.format(out_dir, epoch))
+
+
+def main():
+    # get_num_file('models_scratch/epoch_40.weights', 'bb_gt_relation.txt')
+    # linear_analysis()
+    # model = get_reg_model('bb_gt_relation.txt')
+    # get_bb_thresh_files()
+    # get_bb_thresh_models()
+    visulize_2_validation()
+    pass
+
+
+if __name__ == '__main__':
+    main()

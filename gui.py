@@ -10,7 +10,7 @@ from yolo_voc.darknet import Darknet
 def detect(cfgfile, weightfile, imgfile, namefile):
     m = Darknet(cfgfile)
     m.load_weights(weightfile)
-    print('Loading weights from %s... Done!' % (weightfile))
+    print('Loading weights from {}... Done!'.format(weightfile))
 
     use_cuda = False
     if use_cuda:
@@ -23,7 +23,7 @@ def detect(cfgfile, weightfile, imgfile, namefile):
     boxes = do_detect(m, sized, 0.5, 0.4)
 
     finish = time.time()
-    print('%s: Predicted in %f seconds.' % (imgfile, (finish-start)))
+    print('{}: Predicted in {:f} seconds.'.format(imgfile, (finish-start)))
 
     class_names = read_class_names(namefile)
     plot_boxes(img, boxes, 'predictions.jpg', class_names)
