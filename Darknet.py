@@ -105,7 +105,7 @@ class YoloLayer(nn.Module):
                 gw, gh = gw.float(), gh.float()
                 gi, gj = int(gx), int(gy)
 
-                # 只利用了ground trhth的边长信息来计算iou值，从而找出跟当前ground truth最匹配的anchor(1 of 3)
+                # 只利用了ground truth的边长信息来计算iou值，从而找出跟当前ground truth最匹配的anchor(1 of 3)
                 tmp_gt_boxes = torch.FloatTensor([0, 0, gw, gh]).repeat(nA, 1).t()           # 4*3
                 anchor_boxes = torch.cat((torch.zeros(nA, len(anchors)), anchors), 1).t()    # 4*3
                 # best_n表示3个anchor中第几个anchor最优
