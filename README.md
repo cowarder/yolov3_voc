@@ -34,5 +34,5 @@ In addition, I proposed an improved [NMS](https://en.wikipedia.org/wiki/Canny_ed
 
 If you want to train a Yolov3 model on Pascal VOC 2007 dataset, take steps:  
 * Prepare your dataset, which including transfer label format and get image name file, refer files in [data](https://github.com/cowarder/yolov3_voc/tree/master/data) folder.  
-    * After step 1, run train.py, pay attentation to param configuration.  
-    * Run my_eval.py to evaluate your model performance.  
+* After step 1, run train.py, pay attentation to param configuration.  
+* Run my_eval.py to evaluate your model performance.  
