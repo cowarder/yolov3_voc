@@ -5,20 +5,34 @@ I rewrote the code of Yolov3 and achieved the performance mentioned  in [this pa
 
 In addition, I proposed an improved [NMS](https://en.wikipedia.org/wiki/Canny_edge_detector#Non-maximum_suppression) algorithm that adjust the threshold based on image information and validated it on Pascal Voc 2007 dataset using the Yolov3 model.
 
-[data](https://github.com/cowarder/yolov3_voc/tree/master/data): Firstly, you need to prepare your Pascal VOC 2007 dataset in this folder, and you need to change the configuration in data/voc.data. Please read more in data/Data Description.txt
+* [data](https://github.com/cowarder/yolov3_voc/tree/master/data): Firstly, you need to prepare your Pascal VOC 2007 dataset in this folder, and you need to change the configuration in data/voc.data. Please read more in data/Data Description.txt  
 
-[Darknet.py](https://github.com/cowarder/yolov3_voc/blob/master/Darknet.py): Darknet model file.
+* [Darknet.py](https://github.com/cowarder/yolov3_voc/blob/master/Darknet.py): Darknet model file.  
 
-[camera.py](https://github.com/cowarder/yolov3_voc/blob/master/camera.py): video demo, real-time implementation of trained YOLOV3 model.
+* [camera.py](https://github.com/cowarder/yolov3_voc/blob/master/camera.py): video demo, real-time implementation of trained YOLOV3 model.  
 
-[detect.py](https://github.com/cowarder/yolov3_voc/blob/master/detect.py): image demo. You can make detection of an image by this file.
+* [gui.py](https://github.com/cowarder/yolov3_voc/blob/master/gui.py): graphical user interface to detect image, you can choose any image you like.  
 
-[train.py](https://github.com/cowarder/yolov3_voc/blob/master/train.py): training model file.
+* [detect.py](https://github.com/cowarder/yolov3_voc/blob/master/detect.py): image demo. You can make detection of an image by this file.  
 
-[utils.py](https://github.com/cowarder/yolov3_voc/blob/master/utils.py): this file includes necessary utility functions.
+* [train.py](https://github.com/cowarder/yolov3_voc/blob/master/train.py): training model file.  
 
-[test.py](https://github.com/cowarder/yolov3_voc/blob/master/test.py): my algorithm experiments(this file doesn't relate to YOLOV3 training, ignore it).
+* [utils.py](https://github.com/cowarder/yolov3_voc/blob/master/utils.py): this file includes necessary utility functions.  
 
-[valid.py](https://github.com/cowarder/yolov3_voc/blob/master/valid.py): validation of my algorithm(this file doesn't relate to YOLOV3 training, ignore it).
+* [voc_label.py](https://github.com/cowarder/yolov3_voc/blob/master/voc_label.py): read voc label(xmin, ymin, xmax, ymax) .xml file, and save it as (x, y, w, h) .txt file.  
+
+* [my_eval.py](https://github.com/cowarder/yolov3_voc/blob/master/my_eval.py): evaluate model performance.  
+
+* [test.py](https://github.com/cowarder/yolov3_voc/blob/master/test.py): my algorithm experiments(this file doesn't relate to YOLOV3 training, ignore it).  
+
+* [valid.py](https://github.com/cowarder/yolov3_voc/blob/master/valid.py): validation of my algorithm(this file doesn't relate to YOLOV3 training, ignore it).  
+
+* [augmentation.py](https://github.com/cowarder/yolov3_voc/blob/master/augmentation.py): data augmentations I tried(this file doesn't relate to YOLOV3 training, ignore it).  
+
+* [yolov1.py](https://github.com/cowarder/yolov3_voc/blob/master/yolov1.py): I tried yolov1 model(this file doesn't relate to YOLOV3 training, ignore it).  
 
 
+If you wanna train a yolov3 model on Pascal VOC 2007 dataset, take steps:
+    1. Prepare your dataset, which including transfer label format and get image name file, refer files in [data](https://github.com/cowarder/yolov3_voc/tree/master/data) folder.
+    2. After step 1, run train.py, pay attentation to param configuration.
+    3. run my_eval.py to evaluate your model performance.
