@@ -8,6 +8,19 @@ from image import *
 
 
 class YoloDataset(Dataset):
+    """Yolo dataset format.
+    For training and testing, the format of data needs to be unified.
+    Arguments:
+        root(str): txt file includes all image paths
+        shape(tuple): YOLOv3 needs fixed size of image, official size is (416, 416)
+        jitter(float): for data augmentation
+        hue(float): for data augmentation
+        saturation(float): for data augmentation
+        exposure(float): for data augmentation
+        transform(pytorch transformation):  image transformation, ToTensor() always included
+        train(bool): train or test
+
+    """
     def __init__(self, root, shape=None, jitter=0.3, hue=0.1, saturation=1.5, exposure=1.5, transform=None, train=True):
 
         with open(root, 'r') as file:
@@ -19,9 +32,9 @@ class YoloDataset(Dataset):
         self.shape = shape
 
         self.jitter = jitter
-        self.hue = hue                      # 色调
-        self.saturation = saturation        # 饱和度
-        self.exposure = exposure            # 曝光度
+        self.hue = hue                      # 控制色调
+        self.saturation = saturation        # 控制饱和度
+        self.exposure = exposure            # 控制曝光度
 
     def __len__(self):
         return self.nSamples
@@ -40,6 +53,7 @@ class YoloDataset(Dataset):
                 img, org_w, org_h = letter_image(img, self.shape[0], self.shape[1]), img.width, img.height
             labpath = imgpath.replace('images', 'labels').replace('JPEGImages', 'labels')\
                 .replace('.jpg', '.txt').replace('.png', '.txt')
+            # one image at most has 50 bounding boxes, we need to have a fixed size
             label = torch.zeros(50 * 5)
             try:
                 tmp = torch.from_numpy(read_truths_args(labpath, 8.0 / img.width).astype('float32'))
@@ -58,4 +72,6 @@ class YoloDataset(Dataset):
         if self.train:
             return img, label
         else:
+            # we need to transfer image to original size to evaluate perfoemance
+            # so neet to record original size
             return img, label, org_w, org_h
